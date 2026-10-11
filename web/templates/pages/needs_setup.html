@@ -1,6 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Welcome · PostCadence{% endblock %}
 {% block content %}
+
+{# This page is both the welcome and the place every unreadable-settings error
+   lands. Showing the cheerful version to somebody whose config.json is corrupt
+   would be worse than useless - they need the file name. #}
+{% if error %}
+  <div class="flash flash-bad rise" style="margin:0 0 20px;">
+    <b>Your settings could not be read.</b><br>{{ error }}
+  </div>
+{% endif %}
+
 <section class="hero rise" style="padding:56px 40px;">
   <div class="hero-inner" style="display:block;">
     <div class="eyebrow">Welcome</div>

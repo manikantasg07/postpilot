@@ -1,0 +1,42 @@
+{# A draft GitHub is holding. Same actions as the issue itself, so the two views never disagree. #}
+<article class="card card-pad">
+  <div class="card-head" style="padding:0 0 10px;">
+    <div>
+      <div class="stat-label">Waiting on GitHub · issue #{{ w.number }}</div>
+      <h3 style="font-size:17px; margin-top:4px;">{{ w.date }} {{ w.slot }}</h3>
+    </div>
+    <div class="chips">
+      {% if w.decision == 'approve' %}<span class="chip chip-teal">approved — posts on the next run</span>
+      {% elif w.decision == 'cancel' %}<span class="chip chip-warn">cancelled</span>
+      {% else %}
+        {% set waited = w.minutes_open()|int %}
+        {% if waited < cfg.preview_minutes %}
+          <span class="chip">{{ cfg.preview_minutes - waited }} min of review time left</span>
+        {% else %}
+          <span class="chip chip-warn">review time is up — {{ 'posts' if cfg.preview_timeout_action == 'post' else 'skips' }} on the next run</span>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+
+  {% if w.topic %}<p class="hint" style="margin:0 0 10px;">Topic: <b>{{ w.topic }}</b></p>{% endif %}
+
+  <form method="post" action="/drafts/waiting/{{ w.number }}/save">
+    <textarea class="input editor" name="text" rows="9"
+              maxlength="{{ max_length }}">{{ w.text }}</textarea>
+    <div style="display:flex; gap:10px; margin-top:12px; flex-wrap:wrap; align-items:center;">
+      <button class="btn btn-ghost btn-sm" type="submit" data-busy="Saving…">Save edit</button>
+      <span class="hint">Edits go straight into the issue — the run publishes whatever is there at the time.</span>
+    </div>
+  </form>
+
+  <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
+    <form method="post" action="/drafts/waiting/{{ w.number }}/approve">
+      <button class="btn btn-sm" type="submit" data-busy="Approving…">Approve</button>
+    </form>
+    <form method="post" action="/drafts/waiting/{{ w.number }}/cancel">
+      <button class="btn btn-quiet btn-sm" type="submit" data-busy="Cancelling…">Cancel this slot</button>
+    </form>
+    <a class="btn btn-quiet btn-sm" href="{{ w.url }}" target="_blank" rel="noopener">Open on GitHub ↗</a>
+  </div>
+</article>

@@ -15,7 +15,13 @@ from agent.linkedin.errors import LinkedInError
 AUTH_URL = "https://www.linkedin.com/oauth/v2/authorization"
 TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
 USERINFO_URL = "https://api.linkedin.com/v2/userinfo"
-REDIRECT_URI = "http://localhost:8000/callback"
+# The same URL the app registers, because LinkedIn matches it exactly and the
+# setup guide only ever tells you to register this one. A different value here
+# meant the CLI sign-in failed for everybody who followed the instructions -
+# at the worst moment, since that is the command for a token that has expired.
+REDIRECT_URI = "http://127.0.0.1:8787/setup/linkedin/callback"
+CALLBACK_HOST, CALLBACK_PORT = "127.0.0.1", 8787
+CALLBACK_PATH = "/setup/linkedin/callback"
 SCOPES = "openid profile w_member_social"
 
 class _CallbackHandler(BaseHTTPRequestHandler):
@@ -24,7 +30,7 @@ class _CallbackHandler(BaseHTTPRequestHandler):
     result: dict = {}
     def do_GET(self)->None:
         parsed = urlparse(self.path)
-        if parsed.path!="/callback":
+        if parsed.path != CALLBACK_PATH:
             self.send_error(404)
             return
 
@@ -39,11 +45,27 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         """Silence the default request logging."""
 
 def _wait_for_redirect(timeout: int = 180) -> dict:
-    _CallbackHandler.result={}
-    server = HTTPServer(("localhost", 8000), _CallbackHandler)
+    """Listen on exactly the address the redirect URL names.
+
+    LinkedIn matches the redirect URL character for character, so the CLI has
+    to answer on the same host, port and path the app registers - which also
+    means the app cannot be running at the same time.
+    """
+    _CallbackHandler.result = {}
+    try:
+        server = HTTPServer((CALLBACK_HOST, CALLBACK_PORT), _CallbackHandler)
+    except OSError as exc:
+        raise LinkedInError(
+            f"Port {CALLBACK_PORT} is already in use, so this command cannot catch "
+            "LinkedIn's reply. Close the PostCadence app and try again - or just "
+            "use its LinkedIn page, which does the same thing."
+        ) from exc
+
     server.timeout = timeout
-    server.handle_request()
-    server.server_close()
+    try:
+        server.handle_request()
+    finally:
+        server.server_close()
     return _CallbackHandler.result
 
 def exchange_code(code: str, client_id: str, client_secret: str,
@@ -61,7 +83,10 @@ def exchange_code(code: str, client_id: str, client_secret: str,
     )
 
     if response.status_code != 200:
-        raise LinkedInError(f"Token exchange failed ({response.status_code}): {response.text[:300]}")
+        # No body here. This request carries the client secret in its form
+        # data, and an error that quotes the request back would put that secret
+        # into a message the page urlencodes into a redirect.
+        raise LinkedInError(f"Token exchange failed ({response.status_code}).")
     return response.json()
 
 def fetch_member_id(access_token: str) -> str:

@@ -42,13 +42,28 @@
   </div>
 {% endif %}
 
+{% if waiting or waiting_error %}
+  <section class="rise" style="margin-bottom:24px;">
+    <div class="card-head" style="padding:0 2px 12px;">
+      <h2 style="font-size:18px;">Waiting on GitHub</h2>
+      <span class="hint">written by the scheduled run · approving here is the same as commenting on the issue</span>
+    </div>
+    {% if waiting_error %}
+      <div class="flash flash-warn">Could not read the draft issues: {{ waiting_error }}</div>
+    {% endif %}
+    <div class="stack-lg">
+      {% for w in waiting %}{% include "partials/waiting_card.html" %}{% endfor %}
+    </div>
+  </section>
+{% endif %}
+
 {% if drafts %}
   <div class="stack-lg rise">
     {% for d in drafts %}
       {% include "partials/draft_card.html" %}
     {% endfor %}
   </div>
-{% else %}
+{% elif not waiting %}
   <section class="card card-pad rise" style="text-align:center; padding:56px 24px;">
     <div style="font-size:40px;">📝</div>
     <h2 style="font-size:20px; margin-top:12px;">No drafts yet</h2>
@@ -59,5 +74,5 @@
   </section>
 {% endif %}
 
-<script src="/static/js/drafts.js" defer></script>
+<script src="/static/js/drafts.js?v={{ version }}" defer></script>
 {% endblock %}

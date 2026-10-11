@@ -10,7 +10,11 @@ from agent.cli.ui import console
 from agent.secrets_store import KNOWN_SECRETS, delete_secret, get_secret, mask, set_secret
 
 # Only these are needed by GitHub Actions; the client id and secret stay local.
-PUSHABLE = ("OPENAI_API_KEY", "LINKEDIN_ACCESS_TOKEN")
+# Every secret Actions needs. Leaving a provider out here told Anthropic and
+# Gemini users "not set locally" about a key they had definitely set, and their
+# scheduled runs then failed while the local app worked perfectly.
+PUSHABLE = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",
+            "LINKEDIN_ACCESS_TOKEN")
 
 
 def cmd_secret_set(args: argparse.Namespace) -> int:

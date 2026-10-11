@@ -83,7 +83,8 @@
         {% for line in cron %}<span class="chip"><code>{{ line }}</code></span>{% endfor %}
       </div>
       <p style="color:var(--muted); font-size:13px; margin-top:8px;">
-        These show your saved schedule. They refresh after you press Save.
+        These show your saved schedule. Saving writes them here, pushes them to
+        GitHub, and updates your outside scheduler — no other buttons needed.
         GitHub treats them as best-effort and has lately been hours late —
         <a class="link" href="/setup/trigger">make it punctual →</a>
       </p>
@@ -94,13 +95,14 @@
   {% if saved %}
     <div class="flash flash-ok" style="margin:16px 0 0;">
       Saved.
-      {% if changed %}<b>post.yml was updated</b> — commit and push for GitHub to use it:
-        <code>git add . ; git commit -m "Update posting schedule" ; git push</code>
-      {% else %}post.yml already matched, nothing to push.{% endif %}
+      {% if changed %}<b>post.yml was rewritten.</b>{% else %}post.yml already matched.{% endif %}
+      {# The schedule lives in a third place too when an outside scheduler is
+         managing it. A silent sync is indistinguishable from no sync at all. #}
+      {% if pushed %}<br>{{ pushed }}{% endif %}
     </div>
   {% endif %}
 </section>
 </form>
 
-<script src="/static/js/schedule.js" defer></script>
+<script src="/static/js/schedule.js?v={{ version }}" defer></script>
 {% endblock %}

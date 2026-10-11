@@ -41,7 +41,7 @@
       <input class="input" name="client_id" autocomplete="off"
              value="{{ cfg.github_client_id }}" placeholder="Iv1.0123456789abcdef">
       <input class="input" name="repo" autocomplete="off" style="margin-top:10px;"
-             value="{{ repo }}" placeholder="owner/repository">
+             value="{{ repo }}" placeholder="owner/repository — or paste the github.com address">
       <button class="btn btn-ghost" style="margin-top:12px;">Save</button>
     </form>
 
@@ -78,6 +78,8 @@
         <a class="btn btn-ghost" id="gh-open" href="#" target="_blank" rel="noopener"
            style="margin-top:12px;">Open github.com/login/device →</a>
         <p class="hint" id="gh-status" style="margin-top:10px;">Waiting for you to approve…</p>
+        <button class="btn btn-quiet btn-sm" type="button" id="gh-retry" hidden
+                style="margin-top:10px;">Start over</button>
       </div>
     {% endif %}
   </div>
@@ -136,7 +138,7 @@
   </div>
 
   {% if runs %}
-    <table class="table">
+    <table class="rows">
       <tbody>
         {% for r in runs %}
           <tr>
@@ -160,5 +162,5 @@
   {% endif %}
 </section>
 
-<script src="/static/js/github.js" defer></script>
+<script src="/static/js/github.js?v={{ version }}" defer></script>
 {% endblock %}

@@ -126,14 +126,21 @@ def newer_runs(repo: str, token: str) -> int:
 
 
 def pull_state(repo: str, token: str) -> int:
-    """Replace the local state with GitHub's. Returns how many entries it holds.
+    """Merge GitHub's history into this machine's. Returns what was new to us.
 
-    Safe because the workflow is the only writer of state that matters: every
-    real post was recorded there first.
+    Merge, not replace. The workflow is the main writer but not the only one:
+    publishing from the Drafts page records a `posted` entry here and nowhere
+    else (see agent/run.py). Overwriting would delete those entries, and a
+    slot with no entry looks unhandled - so the next run would publish it
+    again, for real, on a public feed.
     """
     remote, _ = api.get_file(repo, STATE_PATH, token)
     if not remote:
         return 0
+
     theirs = State.from_dict(json.loads(remote))
-    write_json(paths.STATE_FILE, theirs.to_dict())
-    return len(theirs.history)
+    mine = load_state()
+    new_to_us = {key(entry) for entry in theirs.history} - {key(entry) for entry in mine.history}
+
+    write_json(paths.STATE_FILE, merge(mine, theirs).to_dict())
+    return len(new_to_us)

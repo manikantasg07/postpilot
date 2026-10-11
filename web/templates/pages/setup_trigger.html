@@ -1,6 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Punctuality · PostCadence<script src="/static/js/trigger.js" defer></script>
-{% endblock %}
+{% block title %}Punctuality · PostCadence{% endblock %}
 {% block content %}
 
 <section class="hero rise" style="padding:28px 32px;">
@@ -25,7 +24,7 @@
   <p style="color:var(--muted); font-size:14px; margin:6px 0 14px;">
     All three run exactly the same code. They differ only in who says "go".
   </p>
-  <table class="table">
+  <table class="rows">
     <thead>
       <tr><th>Way in</th><th>Needs an account</th><th>Works with your PC off</th><th>On time?</th></tr>
     </thead>
@@ -51,6 +50,74 @@
     Leave GitHub's schedule switched on whichever you add. A second way in costs nothing,
     and <code>run-due</code> never posts the same slot twice.
   </p>
+</section>
+
+
+<section class="card card-pad rise" style="margin-bottom:20px;">
+  <div class="card-head" style="padding:0 0 10px;">
+    <h2 style="font-size:18px;">Let the app manage it for you</h2>
+    {% if automatic %}
+      <span class="chip chip-teal">Connected</span>
+    {% else %}
+      <span class="chip">optional</span>
+    {% endif %}
+  </div>
+
+  <p style="color:var(--muted); font-size:14px; margin:0 0 14px; max-width:70ch;">
+    Set up by hand and your posting times end up in three places: this app,
+    <code>post.yml</code>, and cron-job.org. The app already keeps the first two
+    in step and has no idea the third exists — so change your schedule and it
+    quietly stops matching. Give the app an API key and it owns those cronjobs:
+    saving your schedule updates them too, and the health check can
+    <i>verify</i> instead of reminding you.
+  </p>
+
+  {% if automatic %}
+    <div class="stat-label">Cronjobs the app is managing — {{ cfg.timezone }}</div>
+    <div class="chips" style="margin-top:6px;">
+      {% for moment in jobs %}<span class="chip chip-teal">{{ moment }}</span>
+      {% else %}<span class="chip chip-warn">none yet — press Sync</span>{% endfor %}
+    </div>
+    {% if listing_error %}
+      <p class="hint" style="margin-top:10px; color:var(--rose);">{{ listing_error }}</p>
+    {% endif %}
+    <p class="hint" style="margin-top:10px;">
+      Anything else on your cron-job.org account is left alone — the app only
+      touches jobs it named itself.
+    </p>
+
+    <div style="display:flex; gap:10px; margin-top:16px; flex-wrap:wrap;">
+      <form method="post" action="/setup/trigger/sync">
+        <button class="btn" type="submit" data-busy="Syncing…">Sync now</button>
+      </form>
+      <form method="post" action="/setup/trigger/disconnect">
+        <button class="btn btn-quiet" type="submit"
+                title="Removes the cronjobs the app created, then forgets both keys.">Disconnect</button>
+      </form>
+    </div>
+  {% else %}
+    <form class="stack" method="post" action="/setup/trigger/connect">
+      <div class="stat-label">cron-job.org API key</div>
+      <input class="input" name="api_key" autocomplete="off"
+             placeholder="{{ 'stored — leave blank to keep it' if has_key else 'from their console → Settings → API' }}">
+
+      <div class="stat-label" style="margin-top:14px;">GitHub token to send</div>
+      <input class="input" name="dispatch_token" autocomplete="off"
+             placeholder="{{ 'stored — leave blank to keep it' if has_dispatch_token else 'github_pat_… the fine-grained one from step 1' }}">
+      <p class="hint" style="margin-top:6px;">
+        This is the token that ends up in cron-job.org's database, so it must be
+        the narrow one — <b>{{ token_scope }}</b> on this repository only. Not the
+        sign-in token this app already holds; that one can do far more.
+      </p>
+
+      <button class="btn" style="margin-top:14px;" type="submit" data-busy="Connecting…"
+              {{ '' if repo else 'disabled' }}>Connect cron-job.org</button>
+    </form>
+    <p class="hint" style="margin-top:12px;">
+      Prefer to keep the keys to yourself? Skip this and use the four values below.
+      Everything works the same; you just keep the times in step by hand.
+    </p>
+  {% endif %}
 </section>
 
 <section class="grid grid-3 rise" style="margin-bottom:20px;">
@@ -93,6 +160,7 @@
 
 <section class="card card-pad rise" style="margin-bottom:20px;">
   <h2 style="font-size:18px;">3 · The four things to paste</h2>
+  <p class="hint" style="margin:4px 0 0;">Only needed if you are setting the cronjob up by hand.</p>
 
   <div class="stat-label" style="margin-top:16px;">URL — method POST</div>
   <div class="copyrow"><code id="t-url">{{ url }}</code>
@@ -105,7 +173,7 @@
   {% endif %}
 
   <div class="stat-label" style="margin-top:20px;">Headers</div>
-  <table class="table">
+  <table class="rows">
     <tbody>
       {% for name, value in headers.items() %}
         <tr><td style="width:34%;"><code>{{ name }}</code></td><td><code>{{ value }}</code></td></tr>
@@ -167,5 +235,5 @@
   {% endif %}
 </section>
 
-<script src="/static/js/trigger.js" defer></script>
+<script src="/static/js/trigger.js?v={{ version }}" defer></script>
 {% endblock %}

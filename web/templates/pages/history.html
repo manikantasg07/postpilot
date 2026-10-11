@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}History · PostCadence{% endblock %}
+{% block content %}
+
+<section class="hero rise" style="padding:28px 32px;">
+  <div class="hero-inner">
+    <div>
+      <div class="eyebrow">History</div>
+      <h1 style="font-size:30px; margin-top:6px;">Every run, including the ones that failed</h1>
+      <p style="color:var(--muted); margin:8px 0 0; max-width:56ch;">
+        {{ total }} run{{ '' if total == 1 else 's' }} so far. A slot that failed stays
+        here even after a later run posted it — that is the record of what happened,
+        not a list of what worked.
+      </p>
+    </div>
+    <a class="btn btn-ghost" href="/">← Dashboard</a>
+  </div>
+</section>
+
+<div class="chips rise" style="margin-bottom:18px;">
+  {% for value, label in filters %}
+    <a class="chip {{ 'chip-teal' if value == status }}"
+       href="/history{{ '?status=' ~ value if value }}">
+      {{ label }}{% if value %} · {{ tally.get(value, 0) }}{% endif %}
+    </a>
+  {% endfor %}
+</div>
+
+<section class="card rise" style="overflow:hidden;">
+  {% if rows %}
+    {% include "partials/run_rows.html" %}
+  {% else %}
+    <div class="empty">
+      <div class="empty-icon">📭</div>
+      {% if status %}Nothing with that outcome yet.{% else %}Nothing has run yet.{% endif %}
+    </div>
+  {% endif %}
+</section>
+
+{% endblock %}

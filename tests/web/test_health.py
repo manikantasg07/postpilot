@@ -141,3 +141,83 @@ def test_nothing_else_can_be_dismissed(secrets):
     secrets.discard("OPENAI_API_KEY")
     save_topics([])
     assert [i for i in health.issues() if i.dismissable] == []
+
+
+# --- verifying the outside scheduler, rather than nagging about it -----------
+
+def connect_service(monkeypatch, plan=None, boom=None):
+    """Both keys stored, and a reconciler that answers."""
+    import dataclasses
+
+    from agent.config import load_config, save_config
+    save_config(dataclasses.replace(load_config(), github_repo="me/agent"))
+    monkeypatch.setattr(health, "_secret_value",
+                        lambda name: "x" if name in ("CRONJOB_API_KEY",
+                                                     "GITHUB_DISPATCH_TOKEN") else "")
+
+    def drift(cfg, repo, token, key):
+        if boom:
+            raise boom
+        return plan
+
+    monkeypatch.setattr(health.cronjob_sync, "drift", drift)
+
+
+def test_nothing_is_said_when_the_app_does_not_manage_the_service(secrets, monkeypatch):
+    """Somebody who set their cronjobs up by hand must not be nagged."""
+    monkeypatch.setattr(health, "_secret_value", lambda name: "")
+    assert [i for i in health.issues() if "punctual" in i.title] == []
+
+
+def test_a_matching_service_is_silent(secrets, monkeypatch):
+    from agent.cronjob.sync import Plan
+    connect_service(monkeypatch, plan=Plan())
+    assert [i for i in health.issues() if "punctual" in i.title] == []
+
+
+def test_a_stale_service_is_surfaced(secrets, monkeypatch):
+    from agent.cronjob.sync import Plan
+    connect_service(monkeypatch, plan=Plan(created=["09:30"], deleted=["08:30"]))
+
+    found = [i for i in health.issues() if "punctual" in i.title]
+    assert found and found[0].level == "warn"
+    assert "1 added, 1 removed" in found[0].detail
+    assert found[0].href == "/setup/trigger"
+
+
+def test_an_unreachable_service_is_only_an_aside(secrets, monkeypatch):
+    """The check failing is not the schedule failing. Say so quietly."""
+    from agent.cronjob.errors import CronJobError
+    connect_service(monkeypatch, boom=CronJobError("cron-job.org GET /jobs failed (503)"))
+
+    found = [i for i in health.issues() if "cron-job.org" in i.title]
+    assert found and found[0].level == "info"
+    assert "probably fine" in found[0].detail
+
+
+def test_rate_limiting_says_nothing_at_all(secrets, monkeypatch):
+    """429 means we asked too often. An alarm about our own impatience is noise."""
+    from agent.cronjob.errors import CronJobBusyError
+    connect_service(monkeypatch, boom=CronJobBusyError("rate limiting"))
+
+    assert [i for i in health.issues() if "cron-job.org" in i.title] == []
+
+
+def test_the_answer_is_cached_so_page_loads_do_not_hammer_them(secrets, monkeypatch):
+    """This check runs on every page render. Uncached, refreshing the dashboard
+    is what earned the 429 in the first place."""
+    from agent.cronjob.sync import Plan
+
+    calls = []
+    connect_service(monkeypatch, plan=Plan())
+    monkeypatch.setattr(health.cronjob_sync, "drift",
+                        lambda cfg, repo, token, key: calls.append(1) or Plan())
+
+    health.issues()
+    health.issues()
+    health.issues()
+    assert len(calls) == 1
+
+    health.forget_trigger_cache()
+    health.issues()
+    assert len(calls) == 2

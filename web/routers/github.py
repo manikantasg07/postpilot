@@ -63,7 +63,9 @@ def page(request: Request, error: str = "", done: str = "") -> HTMLResponse:
             if cfg.github_repo:
                 runs = api.recent_runs(cfg.github_repo, token, limit=5)
                 on_github = repo_secrets.existing_secrets(cfg.github_repo, token)
-        except GitHubError as exc:
+        except (GitHubError, OSError) as exc:
+            # requests raises OSError subclasses when the network is simply not
+            # there - and this is the page you open to debug exactly that.
             error = error or str(exc)
 
     return templates.TemplateResponse(
@@ -94,10 +96,17 @@ def save_client(client_id: str = Form(""), repo: str = Form("")) -> RedirectResp
     stored Client ID just by correcting the repo name would be a nasty surprise.
     """
     current = load_or_default()
+
+    typed = repo.strip()
+    wanted = api.normalise_repo(typed) if typed else current.github_repo
+    if typed and not wanted:
+        return _back(error=f"{typed} does not look like a repository. "
+                           "Use owner/repository, or paste the address of the repo on github.com.")
+
     cfg = dataclasses.replace(
         current,
         github_client_id=client_id.strip() or current.github_client_id,
-        github_repo=repo.strip() or current.github_repo,
+        github_repo=wanted,
     )
     save_config(cfg)
     return _back(done="Saved.")
@@ -129,17 +138,39 @@ def poll() -> JSONResponse:
         return JSONResponse({"error": "Nothing to wait for. Press Connect again."}, status_code=400)
 
     try:
-        token = device.poll_once(cfg.github_client_id, code)
+        answer = device.poll_once(cfg.github_client_id, code)
     except GitHubError as exc:
         _pending.clear()
         return JSONResponse({"error": str(exc)}, status_code=400)
 
-    if token is None:
-        return JSONResponse({"status": "waiting"})
+    if answer.waiting:
+        # Tell the page why. Without the reason, "we asked too often" and
+        # "he has not approved yet" look identical, and only one of them is
+        # fixed by waiting longer.
+        return JSONResponse({"status": "waiting", "reason": answer.reason,
+                             "slow_down": answer.too_fast})
 
-    set_secret("GITHUB_TOKEN", token)
+    token = answer.token
+
+    # GitHub has approved us. Everything after this is local, and a failure
+    # here is the worst kind: the sign-in worked, so the page would keep
+    # saying "waiting" while nothing was ever going to change. Answer with the
+    # reason instead of letting it become a 500 the page cannot read.
     _pending.clear()
-    return JSONResponse({"status": "connected", "login": api.current_user(token)})
+    try:
+        set_secret("GITHUB_TOKEN", token)
+    except Exception as exc:
+        return JSONResponse(
+            {"error": f"GitHub approved the sign-in, but the token could not be saved: {exc}"},
+            status_code=400)
+
+    try:
+        login = api.current_user(token)
+    except GitHubError as exc:
+        return JSONResponse({"error": f"Signed in, but GitHub would not say who: {exc}"},
+                            status_code=400)
+
+    return JSONResponse({"status": "connected", "login": login})
 
 
 @router.post("/push")
@@ -150,20 +181,39 @@ def push(next: str = Form("/setup/github")) -> RedirectResponse:
     if not (token and cfg.github_repo):
         return _back(next, error="Connect GitHub and set the repository first.")
 
-    changed: list[str] = []
     try:
-        for path, label in SYNCED:
-            text = _repo_file(path).replace("\r\n", "\n")   # GitHub keeps LF
-            remote, _ = api.get_file(cfg.github_repo, path, token)
-            if sync.same_text(remote, text):
-                continue
-            api.put_file(cfg.github_repo, path, text, f"chore: update {label} from PostCadence", token)
-            changed.append(path)
+        changed = push_settings(cfg.github_repo, token)
     except (GitHubError, OSError) as exc:
         return _back(next, error=str(exc))
 
     forget_sync_cache()
     return _back(next, done=f"Pushed {len(changed)} file(s)." if changed else "Everything already matched.")
+
+
+def push_settings(repo: str, token: str) -> list[str]:
+    """Send every changed settings file up as a single commit.
+
+    One commit, not one per file: config.json and post.yml describe the same
+    schedule, and a commit where only one of them has moved is a commit where
+    the repository contradicts itself.
+    """
+    files: dict[str, str] = {}
+    for path, _label in SYNCED:
+        text = _repo_file(path).replace("\r\n", "\n")       # GitHub keeps LF
+
+        # A missing local file reads as "" - and pushing "" would commit an
+        # empty post.yml over the working one, taking the whole schedule with
+        # it. Absent means "nothing to say about this file", never "empty it".
+        if not text.strip():
+            continue
+
+        remote, _ = api.get_file(repo, path, token)
+        if not sync.same_text(remote, text):
+            files[path] = text
+
+    if files:
+        api.put_files(repo, files, "chore: update your schedule and settings from PostCadence", token)
+    return sorted(files)
 
 
 @router.post("/secrets")

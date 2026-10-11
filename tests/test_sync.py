@@ -15,8 +15,8 @@ def sandbox(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "ROOT", tmp_path)
     monkeypatch.setattr(paths, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(paths, "STATE_FILE", tmp_path / "data" / "state.json")
-    (tmp_path / "data").mkdir()
-    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / "data").mkdir(exist_ok=True)
+    (tmp_path / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
     (tmp_path / "data" / "config.json").write_text('{"tone": "casual"}', encoding="utf-8")
     (tmp_path / "data" / "topics.json").write_text('{"topics": ["a"]}', encoding="utf-8")
     (tmp_path / ".github" / "workflows" / "post.yml").write_text("on: {}\n", encoding="utf-8")
@@ -72,13 +72,44 @@ def test_being_ahead_of_github_is_not_negative(monkeypatch):
     assert sync.newer_runs("me/agent", "t") == 0
 
 
-def test_pull_state_replaces_the_local_copy(monkeypatch):
-    save_state(history(1))
+def test_pull_state_brings_down_what_is_new(monkeypatch):
+    """`history(n)` stamps a fresh created_at each call, so build both sides
+    from the same entries - otherwise nothing would ever match."""
+    shared = entry("2026-09-27", "09:00", "T09")
+    save_state(State(history=[shared]))
+    theirs = State(history=[shared, entry("2026-09-28", "09:00", "T10")])
     monkeypatch.setattr(sync.api, "get_file",
-                        remote({"data/state.json": json.dumps(history(4).to_dict())}))
+                        remote({"data/state.json": json.dumps(theirs.to_dict())}))
 
-    assert sync.pull_state("me/agent", "t") == 4
-    assert len(load_state().history) == 4
+    assert sync.pull_state("me/agent", "t") == 1      # one of the two was already here
+    assert len(load_state().history) == 2
+
+
+def test_pulling_never_deletes_a_post_made_in_the_app(monkeypatch):
+    """The sharpest edge there was: publish here, press Pull, and the entry is
+    gone - so the slot looks unhandled and the next run posts it again, for
+    real, on a public feed."""
+    here = entry("2026-09-29", "09:00", "T10")
+    save_state(State(history=[here]))
+    theirs = State(history=[entry("2026-09-28", "09:00", "T09")])
+    monkeypatch.setattr(sync.api, "get_file",
+                        remote({"data/state.json": json.dumps(theirs.to_dict())}))
+
+    sync.pull_state("me/agent", "t")
+
+    dates = [e.date for e in load_state().history]
+    assert dates == ["2026-09-28", "2026-09-29"]      # both kept
+
+
+def test_pulling_twice_changes_nothing_the_second_time(monkeypatch):
+    theirs = State(history=[entry("2026-09-27", "09:00", "T09"),
+                            entry("2026-09-28", "09:00", "T10")])
+    monkeypatch.setattr(sync.api, "get_file",
+                        remote({"data/state.json": json.dumps(theirs.to_dict())}))
+
+    assert sync.pull_state("me/agent", "t") == 2
+    assert sync.pull_state("me/agent", "t") == 0
+    assert len(load_state().history) == 2
 
 
 def test_pull_with_no_remote_state_changes_nothing(monkeypatch):

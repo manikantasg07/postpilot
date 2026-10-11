@@ -6,13 +6,13 @@ import re
 MAX_LENGTH = 3000
 MAX_HASHTAGS = 3
 
-FENCE = re.compile(r"^```.*$", re.MULTILINE)
-HEADING = re.compile(r"^#{1,6}\s*", re.MULTILINE)
-BOLD_ITALIC = re.compile(r"(\*{1,3}|_{2,3})(.+?)\1")
-QUOTE = re.compile(r"^>\s?", re.MULTILINE)
-RULE = re.compile(r"^\s*([-*_])\1{2,}\s*$", re.MULTILINE)
-BULLET = re.compile(r"^\s*[-*•]\s+", re.MULTILINE)
-BLANKS = re.compile(r"\n{3,}")
+FENCE = re.compile(r"^```.*$", re.MULTILINE)          # ```python fences
+HEADING = re.compile(r"^#{1,6}\s*", re.MULTILINE)     # ## Heading
+BOLD_ITALIC = re.compile(r"(\*{1,3}|_{2,3})(.+?)\1")  # **bold**, *italic*, __bold__
+QUOTE = re.compile(r"^>\s?", re.MULTILINE)            # > quotes
+RULE = re.compile(r"^\s*([-*_])\1{2,}\s*$", re.MULTILINE)  # --- horizontal rules
+BULLET = re.compile(r"^\s*[-*•]\s+", re.MULTILINE)    # - bullet
+BLANKS = re.compile(r"\n{3,}")                        # 3+ newlines
 TRAILING = re.compile(r"[ \t]+$", re.MULTILINE)
 HASHTAG = re.compile(r"#\w+")
 WRAPPED = re.compile(r'^["\'](.+)["\']$', re.DOTALL)
@@ -23,9 +23,11 @@ STOPWORDS = {
     "this", "they", "them", "from", "at", "by", "or", "vs", "be", "you", "we",
     "actually", "still", "just", "got", "not", "do", "does", "can", "should",
     "first", "end", "learned", "built", "building", "beat", "picking", "right",
+    # verbs that make weak hashtags
     "choosing", "cutting", "changing", "making", "using", "getting", "adding",
     "combining", "measuring", "improving", "shipping", "fail", "fails",
 }
+
 
 def strip_markdown(text: str) -> str:
     """Remove formatting LinkedIn cannot render."""
@@ -36,9 +38,11 @@ def strip_markdown(text: str) -> str:
     text = BOLD_ITALIC.sub(r"\2", text)
     return text
 
+
 def normalise_bullets(text: str, marker: str = "→ ") -> str:
     """Markdown bullets become a character LinkedIn shows as typed."""
     return BULLET.sub(marker, text)
+
 
 def tidy_spacing(text: str) -> str:
     """One blank line between paragraphs, no trailing spaces."""
@@ -46,10 +50,12 @@ def tidy_spacing(text: str) -> str:
     text = BLANKS.sub("\n\n", text)
     return text.strip()
 
+
 def unwrap_quotes(text: str) -> str:
     """Models sometimes wrap the whole post in quotation marks."""
     match = WRAPPED.match(text.strip())
     return match.group(1).strip() if match else text
+
 
 def hashtags_for(topic: str, existing: str, limit: int = MAX_HASHTAGS) -> list[str]:
     """Pick the most distinctive words in the topic and turn them into hashtags.
@@ -72,6 +78,7 @@ def hashtags_for(topic: str, existing: str, limit: int = MAX_HASHTAGS) -> list[s
     best = sorted(candidates, key=lambda c: -c[0])[:limit]
     return [tag for _, _, tag in sorted(best, key=lambda c: c[1])]
 
+
 def fit_length(text: str, limit: int = MAX_LENGTH) -> str:
     """Trim to the limit at a paragraph or sentence boundary, never mid-word."""
     if len(text) <= limit:
@@ -83,6 +90,7 @@ def fit_length(text: str, limit: int = MAX_LENGTH) -> str:
         if position > limit * 0.6:
             return cut[:position].rstrip(" .\n") + ("." if boundary == ". " else "")
     return cut.rsplit(" ", 1)[0].rstrip() + "..."
+
 
 def format_post(raw: str, topic: str, add_hashtags: bool = True) -> str:
     """Full clean-up: raw model text in, publishable post out."""

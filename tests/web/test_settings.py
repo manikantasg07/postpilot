@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent import paths
-from agent.config import load_config
+from agent.config import load_config, save_config
 from agent.github.sync import FileStatus
 from web.app import app
 from web.routers import sync as badge
@@ -222,3 +222,132 @@ def test_dismissing_twice_is_harmless():
     skips = [h for h in load_state().history
              if h.date == "2026-09-25" and h.status == "skipped"]
     assert len(skips) == 1
+
+
+# --- saving the schedule keeps the outside scheduler in step ----------------
+
+def schedule_form(times=("10:00",)):
+    return {"post_times": list(times), "timezone": "America/Los_Angeles", "mode": "preview",
+            "preview_minutes": 30, "preview_timeout_action": "post", "catch_up_hours": 6}
+
+
+def test_saving_the_schedule_pushes_it_to_the_service(monkeypatch):
+    """Otherwise cron-job.org keeps firing at yesterday's times."""
+    import dataclasses
+
+    from agent.cronjob.sync import Plan
+    from web.routers import schedule as page
+
+    save_config(dataclasses.replace(load_config(), github_repo="me/agent"))
+    monkeypatch.setattr(page, "get_secret", lambda name: "stored")
+    sent = {}
+    monkeypatch.setattr(page.cronjob_sync, "apply",
+                        lambda cfg, repo, token, key: sent.update(times=cfg.post_times)
+                        or Plan(created=["09:30"], deleted=["08:30"]))
+
+    body = client.post("/setup/schedule", data=schedule_form()).text
+
+    assert sent["times"] == ["10:00"]
+    assert "1 added, 1 removed" in body       # and it says so, rather than syncing in silence
+
+
+def test_nothing_is_pushed_when_the_service_is_not_connected(monkeypatch):
+    from web.routers import schedule as page
+    monkeypatch.setattr(page, "get_secret", lambda name: "")
+    monkeypatch.setattr(page.cronjob_sync, "apply",
+                        lambda *a, **k: pytest.fail("should not reach the service"))
+
+    assert client.post("/setup/schedule", data=schedule_form()).status_code == 200
+
+
+def test_a_service_outage_does_not_lose_the_schedule(monkeypatch):
+    """The config saved fine. Losing that because a third party was briefly
+    unreachable would be worse than being late for one day."""
+    import dataclasses
+
+    from agent.cronjob.errors import CronJobError
+    from web.routers import schedule as page
+
+    save_config(dataclasses.replace(load_config(), github_repo="me/agent"))
+    monkeypatch.setattr(page, "get_secret", lambda name: "stored")
+
+    def boom(*args, **kwargs):
+        raise CronJobError("cron-job.org PUT /jobs failed (503)")
+
+    monkeypatch.setattr(page.cronjob_sync, "apply", boom)
+
+    body = client.post("/setup/schedule", data=schedule_form(["11:00"])).text
+
+    assert load_config().post_times == ["11:00"]      # saved anyway
+    assert "was not updated" in body and "503" in body
+
+
+# --- one Save, all four places ----------------------------------------------
+
+def wired(monkeypatch, github=True, service=True):
+    """Whatever is connected, connected."""
+    import dataclasses
+
+    from web.routers import schedule as page
+    save_config(dataclasses.replace(load_config(), github_repo="me/agent"))
+    monkeypatch.setattr(page, "get_secret",
+                        lambda name: "stored" if (name == "GITHUB_TOKEN") == github
+                        or (name != "GITHUB_TOKEN") == service else "")
+    return page
+
+
+def test_saving_pushes_to_github_without_a_second_button(monkeypatch):
+    """Actions reads the schedule from the repo. A save that stops at this
+    laptop changes nothing at all."""
+    import dataclasses
+
+    from web.routers import schedule as page
+    save_config(dataclasses.replace(load_config(), github_repo="me/agent"))
+    monkeypatch.setattr(page, "get_secret", lambda name: "stored")
+    monkeypatch.setattr(page.cronjob_sync, "apply", lambda *a, **k: __import__(
+        "agent.cronjob.sync", fromlist=["Plan"]).Plan())
+
+    sent = []
+    monkeypatch.setattr(page, "push_settings", lambda repo, token: sent.append(repo)
+                        or ["data/config.json", ".github/workflows/post.yml"])
+
+    body = client.post("/setup/schedule", data=schedule_form(["11:30"])).text
+
+    assert sent == ["me/agent"]
+    assert "Pushed 2 file(s) to GitHub" in body
+
+
+def test_a_github_failure_still_saves_and_still_syncs_the_service(monkeypatch):
+    """Three independent places. One being unreachable must not stop the others."""
+    import dataclasses
+
+    from agent.cronjob.sync import Plan
+    from agent.github.errors import GitHubError
+    from web.routers import schedule as page
+
+    save_config(dataclasses.replace(load_config(), github_repo="me/agent"))
+    monkeypatch.setattr(page, "get_secret", lambda name: "stored")
+
+    def boom(repo, token):
+        raise GitHubError("GitHub PUT failed (502)")
+
+    synced = []
+    monkeypatch.setattr(page, "push_settings", boom)
+    monkeypatch.setattr(page.cronjob_sync, "apply",
+                        lambda cfg, repo, token, key: synced.append(cfg.post_times)
+                        or Plan(created=["11:00"]))
+
+    body = client.post("/setup/schedule", data=schedule_form(["11:30"])).text
+
+    assert load_config().post_times == ["11:30"]        # saved regardless
+    assert synced == [["11:30"]]                        # and the service still got it
+    assert "GitHub was not updated" in body and "502" in body
+
+
+def test_nothing_is_pushed_when_github_is_not_connected(monkeypatch):
+    from web.routers import schedule as page
+    monkeypatch.setattr(page, "get_secret", lambda name: "")
+    monkeypatch.setattr(page, "push_settings",
+                        lambda *a, **k: pytest.fail("should not reach GitHub"))
+
+    assert client.post("/setup/schedule", data=schedule_form()).status_code == 200

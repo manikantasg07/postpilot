@@ -9,6 +9,7 @@ from pathlib import Path
 
 from agent import paths
 from agent.config import Config
+from agent.jsonio import write_atomic
 from agent.schedule import cron_lines
 
 WORKFLOW = Path(".github") / "workflows" / "post.yml"
@@ -76,5 +77,5 @@ def apply(cfg: Config, path: Path | None = None) -> tuple[list[str], bool]:
     after = rewrite_cron(before, lines)
 
     if after != before:
-        path.write_text(after, encoding="utf-8", newline="\n")
+        write_atomic(path, after)
     return lines, after != before
