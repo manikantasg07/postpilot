@@ -1,6 +1,6 @@
 {
   "llm_provider": "openai",
-  "llm_model": "o4-mini",
+  "llm_model": "gpt-5.5",
   "timezone": "America/New_York",
   "posts_per_day": 2,
   "post_times": [
