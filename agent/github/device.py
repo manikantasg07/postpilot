@@ -10,6 +10,8 @@ Nothing sensitive passes through this app: the approval happens on github.com.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import requests
 
 from agent.github.errors import GitHubAuthError, GitHubError
@@ -27,7 +29,15 @@ TIMEOUT = 30
 JSON = {"Accept": "application/json"}
 
 # What GitHub says while it waits for you, versus what has actually gone wrong.
+#
+# "slow_down" is not the same as "authorization_pending". It means we asked too
+# often, and GitHub's rule is that the caller must then wait five seconds
+# longer than before. Treating the two alike means polling at a rate GitHub has
+# already refused, so it keeps answering slow_down and the token is never
+# handed over - the page waits for ever with nothing visibly wrong.
 WAITING = {"authorization_pending", "slow_down"}
+BACK_OFF = "slow_down"
+EXTRA_SECONDS = 5
 MESSAGES = {
     "expired_token": "The code expired. Start again.",
     "access_denied": "You cancelled the approval on GitHub.",
@@ -63,8 +73,24 @@ def start(client_id: str) -> dict:
     }
 
 
-def poll_once(client_id: str, device_code: str) -> str | None:
-    """One "are we there yet?". Token when approved, None while still waiting.
+@dataclass
+class Answer:
+    """One reply from GitHub: the token, or why not yet."""
+
+    token: str = ""
+    reason: str = ""          # "authorization_pending" or "slow_down"
+
+    @property
+    def waiting(self) -> bool:
+        return not self.token
+
+    @property
+    def too_fast(self) -> bool:
+        return self.reason == BACK_OFF
+
+
+def poll_once(client_id: str, device_code: str) -> Answer:
+    """One "are we there yet?".
 
     Raises when the answer is a real refusal, so the page can stop polling.
     """
@@ -72,10 +98,10 @@ def poll_once(client_id: str, device_code: str) -> str | None:
 
     token = data.get("access_token")
     if token:
-        return token
+        return Answer(token=token)
 
     error = data.get("error", "")
     if error in WAITING:
-        return None
+        return Answer(reason=error)
 
     raise GitHubAuthError(MESSAGES.get(error, f"GitHub said: {error or data}"))

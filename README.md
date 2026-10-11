@@ -237,7 +237,7 @@ A few decisions worth knowing about:
 
 | File | Runs | Does |
 |---|---|---|
-| `post.yml` | your schedule, or manually | writes and publishes, then commits `state.json` back |
+| `post.yml` | your schedule, an outside trigger, or manually | writes and publishes, then commits `state.json` back |
 | `ci.yml` | every push and pull request | ruff and pytest on Python 3.10–3.12 |
 | `token.yml` | Mondays | opens an issue when the LinkedIn token is close to expiring |
 
@@ -254,6 +254,10 @@ A few decisions worth knowing about:
 | Actions didn't run at your time | GitHub's scheduled runs are best-effort and have lately been hours late | raise `catch_up_hours`, or see [Punctuality](#punctuality-when-github-runs-late) |
 | *Port 8787 is already in use* | another PostCadence window is still open | close it, or see *Changing the port* |
 | Sync badge: *N new runs on GitHub* | GitHub has posted since you last looked | Settings → Pull post history |
+| *This machine has no place to store … securely* | no keyring backend — common on headless Linux, WSL and containers | install one (`pip install keyrings.alt`, or a Secret Service), or pass the key as an environment variable |
+| Scheduled runs fail with *No ANTHROPIC_API_KEY stored* | the key is on this machine but not on GitHub | Setup → GitHub → **Send your keys** |
+| A post never went out and nothing was recorded | the slot fell outside `catch_up_hours`, which is the one path that records nothing | raise `catch_up_hours`, or see [Punctuality](#punctuality-when-github-runs-late) |
+| *config.json is not valid JSON* | a half-written or hand-edited data file | fix or delete it; the app rebuilds it |
 
 ---
 
@@ -274,11 +278,12 @@ GitHub's own schedule switched on whichever you add — a slot that is already
 handled is skipped, so an extra trigger costs nothing but a few seconds of
 runner time.
 
-| Way in | Extra account | Works with your PC off | On time? |
-|---|---|---|---|
-| GitHub's schedule *(already on)* | none | yes | often hours late |
-| Your own computer | none | no | to the second |
-| A scheduling service | one, free | yes | to the minute |
+| Way in | Extra account | Works with your PC off | On time? | Can drift? |
+|---|---|---|---|---|
+| GitHub's schedule *(already on)* | none | yes | often hours late | no — the app writes `post.yml` |
+| Your own computer | none | no | to the second | yes — you set the times |
+| A scheduling service, app-managed | one, free | yes | to the minute | no — the app owns the jobs |
+| A scheduling service, by hand | one, free | yes | to the minute | yes — you set the times |
 
 Open **Settings → Make it punctual** (`/setup/trigger`) in the app and it prints
 the exact URL, headers, body and times for your own configuration, with a button
@@ -313,6 +318,37 @@ Works with the machine off, at the cost of one free account.
 [cron-job.org](https://cron-job.org) needs only an email address, allows
 arbitrary headers and a request body, and goes down to one-minute resolution.
 Cloudflare Workers cron triggers work too if you already use Cloudflare.
+
+There are two ways to do this: let the app manage the service for you, or set
+it up by hand.
+
+#### Let the app manage it (recommended)
+
+Set the cronjob up by hand and your posting times live in three places — this
+app, `post.yml`, and cron-job.org. The app keeps the first two in step and has
+no idea the third exists, so changing your schedule silently stops it matching.
+Give the app an API key and that copy stops being a copy: **Save schedule**
+updates the cronjobs too, and the health check verifies them instead of
+reminding you.
+
+1. Make the GitHub token described below.
+2. In the cron-job.org console → **Settings**, generate an **API key**.
+3. In PostCadence → **Settings → Make it punctual**, paste both and press
+   **Connect**, then **Sync now**.
+
+The app creates one cronjob per tick, named `PostCadence · HH:MM`. Anything else
+on your cron-job.org account is left alone — it only touches jobs it named
+itself. **Disconnect** removes its cronjobs and forgets both keys, in that
+order, so nothing is left firing that the app can no longer reach.
+
+The sync is a reconciler, not a script: it reads what the account has, works out
+what it should have, and applies the difference. Pressing **Sync now** twice
+does nothing the second time, and running it against a half-finished attempt
+finishes the job.
+
+#### Or set it up by hand
+
+Skip the API key and keep the times in step yourself.
 
 **1. Make a token.** On GitHub → Settings → Developer settings →
 [Fine-grained tokens](https://github.com/settings/personal-access-tokens/new):
@@ -363,11 +399,62 @@ same request as a dry run: the model writes a post and the run appears in your
 Actions tab, but nothing reaches LinkedIn. A success there means the only thing
 left to get wrong is the times.
 
+### Where the secrets live
+
+| Secret | What it can do | Where it is kept |
+|---|---|---|
+| `GITHUB_TOKEN` | sign-in for this app: push settings, open draft issues, send secrets | your OS keyring, this machine only |
+| `GITHUB_DISPATCH_TOKEN` | start this one workflow, nothing else | your OS keyring **and** cron-job.org |
+| `CRONJOB_API_KEY` | manage your cronjobs | your OS keyring, this machine only |
+
+Only the middle one leaves your machine, and it is deliberately the weakest of
+the three. Do not reuse `GITHUB_TOKEN` for it.
+
 ### What this does not fix
 
 The run still happens on GitHub's runners, so if Actions itself is down, nothing
 runs. It is the *scheduler* this replaces, not the platform. Keeping
 `catch_up_hours` generous is still worthwhile.
+
+---
+
+## Forking this for yourself
+
+The three files in `data/` are **committed on purpose** — GitHub Actions reads
+your schedule and topics out of the repository, so they have to travel. That
+also means this repo carries its author's schedule, topics and history.
+
+After forking, replace them before you do anything else:
+
+```bash
+cp data/config.example.json data/config.json
+cp data/topics.example.json data/topics.json
+cp data/state.example.json  data/state.json
+```
+
+Then open the app and walk the five setup steps. `config.json` holds no
+secrets — keys live in your OS keyring and, once you press **Send your keys**,
+in GitHub's encrypted secrets. It does hold your LinkedIn member id, your
+OAuth client id and your repository name, which is why a fork needs its own.
+
+---
+
+## Installing it elsewhere
+
+`python -m web` from a clone is the supported way to run this, and what the
+guide above assumes.
+
+`pip install .` works, with one catch: the package then lives in
+site-packages, where your data must not be written and `.github/` does not
+exist at all. Point it back at your checkout:
+
+```bash
+export POSTCADENCE_HOME=/path/to/linkedin-agent    # setx on Windows
+postcadence-web
+```
+
+Without that, the app reads and writes inside site-packages, and saving a
+schedule fails because there is no `post.yml` to rewrite.
 
 ---
 

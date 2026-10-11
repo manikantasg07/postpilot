@@ -16,6 +16,27 @@ TIMEOUT = 30
 # https://github.com/owner/repo.git  and  git@github.com:owner/repo.git
 REMOTE = re.compile(r"github\.com[/:]([\w.-]+)/([\w.-]+?)(?:\.git)?$")
 
+# What a person actually pastes into the repository box. The field asks for
+# "owner/repo", but it sits directly under a paragraph of github.com links, so
+# the address bar is the obvious thing to copy. Accepting both costs one regex;
+# rejecting the URL cost a 404 reading
+# "/repos/https://github.com/owner/repo/contents/..." with no hint of the cause.
+REPO_INPUT = re.compile(
+    r"^(?:(?:https?://)?(?:www\.)?(?:[\w.-]+@)?github\.com[/:])?"
+    r"([\w.-]+)/([\w.-]+?)(?:\.git)?/?$"
+)
+
+
+def normalise_repo(text: str) -> str:
+    """Turn anything that names a GitHub repository into "owner/repo".
+
+    Accepts the browser URL, the clone URL, the SSH form, a trailing slash or
+    .git, and the plain owner/repo the field asks for. Returns "" for anything
+    else, so the caller can say so rather than building a broken request.
+    """
+    match = REPO_INPUT.match(text.strip())
+    return f"{match.group(1)}/{match.group(2)}" if match else ""
+
 
 def call(method: str, path: str, token: str, **kwargs) -> dict | list:
     """One place for headers, timeouts and error messages."""
@@ -37,7 +58,10 @@ def call(method: str, path: str, token: str, **kwargs) -> dict | list:
             "Reconnect, and make sure the app may read and write this repository."
         )
     if response.status_code >= 300:
-        raise GitHubError(f"GitHub {method} {path} failed ({response.status_code}): {response.text[:300]}")
+        # No response body: these messages are shown to the user and end up in
+        # redirect query strings, and an API that echoes the request back would
+        # put a token there. The status code is what tells you what to do.
+        raise GitHubError(f"GitHub {method} {path} failed ({response.status_code}).")
 
     return response.json() if response.content else {}
 
@@ -94,6 +118,47 @@ def put_file(repo: str, path: str, text: str, message: str, token: str) -> str:
 
     data = call("PUT", f"/repos/{repo}/contents/{path}", token, json=body)
     return data.get("commit", {}).get("sha", "")
+
+
+def default_branch(repo: str, token: str) -> str:
+    return call("GET", f"/repos/{repo}", token).get("default_branch", "main")
+
+
+def put_files(repo: str, files: dict[str, str], message: str, token: str,
+              branch: str = "") -> str:
+    """Write several files as ONE commit. Returns the new commit's sha.
+
+    put_file() writes one file per commit, which is fine on its own and wrong
+    for a set that has to agree. config.json and post.yml describe the same
+    schedule, so committing them separately leaves a commit in between where
+    they contradict each other - and that commit fails the cron-drift test,
+    turning CI red and sending a failure notification for a change that was
+    perfectly correct.
+
+    This is the plumbing API rather than the contents API: build a tree from
+    the current one, hang a commit off it, then move the branch.
+    """
+    if not files:
+        return ""
+
+    branch = branch or default_branch(repo, token)
+    ref = call("GET", f"/repos/{repo}/git/ref/heads/{branch}", token)
+    head = ref["object"]["sha"]
+    base_tree = call("GET", f"/repos/{repo}/git/commits/{head}", token)["tree"]["sha"]
+
+    tree = call("POST", f"/repos/{repo}/git/trees", token, json={
+        "base_tree": base_tree,
+        "tree": [{"path": path, "mode": "100644", "type": "blob", "content": text}
+                 for path, text in sorted(files.items())],
+    })
+
+    commit = call("POST", f"/repos/{repo}/git/commits", token, json={
+        "message": message, "tree": tree["sha"], "parents": [head],
+    })
+
+    call("PATCH", f"/repos/{repo}/git/refs/heads/{branch}", token,
+         json={"sha": commit["sha"]})
+    return commit["sha"]
 
 
 def recent_runs(repo: str, token: str, limit: int = 5) -> list[dict]:

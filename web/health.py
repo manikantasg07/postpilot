@@ -6,8 +6,11 @@ Each check is a plain question about local files and the keyring - no network
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from agent.config import Config, is_first_run, load_or_default
+from agent.cronjob import sync as cronjob_sync
+from agent.cronjob.errors import CronJobBusyError, CronJobError
 from agent.llm import KEY_NAMES
 from agent.schedule import cron_lines
 from agent.secrets_store import get_secret
@@ -37,6 +40,13 @@ class Issue:
     @property
     def dismissable(self) -> bool:
         return bool(self.dismiss_date and self.dismiss_slot)
+
+
+def _secret_value(name: str) -> str:
+    try:
+        return get_secret(name) or ""
+    except Exception:
+        return ""
 
 
 def _secret(name: str | None) -> bool:
@@ -122,6 +132,60 @@ def check_last_run(cfg: Config) -> Issue | None:
                  dismiss_date=last.date, dismiss_slot=last.slot)
 
 
+# Every page load asks every check. This one talks to a third party over the
+# network, so its answer is kept for a while: without that, opening the
+# dashboard twice in a minute is two more requests cron-job.org did not need,
+# and enough of them earns a 429 that makes the check useless.
+DRIFT_TTL = timedelta(minutes=10)
+_drift_cache: dict[str, object] = {}
+
+
+def forget_trigger_cache() -> None:
+    """Called after a sync, so the page shows the result and not the memory."""
+    _drift_cache.clear()
+
+
+def _drift(cfg: Config, repo: str, token: str, key: str):
+    fresh = _drift_cache.get("at")
+    if isinstance(fresh, datetime) and datetime.now(timezone.utc) - fresh < DRIFT_TTL:
+        return _drift_cache["plan"]
+
+    plan = cronjob_sync.drift(cfg, repo, token, key)
+    _drift_cache.update(at=datetime.now(timezone.utc), plan=plan)
+    return plan
+
+
+def check_trigger(cfg: Config) -> Issue | None:
+    """Is the outside scheduler still firing at the times we post at?
+
+    Only asked when the app has been given the keys to manage it. Somebody who
+    set their cronjobs up by hand is not nagged about a thing this check
+    cannot see.
+    """
+    key = _secret_value("CRONJOB_API_KEY")
+    token = _secret_value("GITHUB_DISPATCH_TOKEN")
+    if not (key and token and cfg.github_repo):
+        return None
+
+    try:
+        plan = _drift(cfg, cfg.github_repo, token, key)
+    except CronJobBusyError:
+        # Not a problem with the schedule - we asked too often. Saying nothing
+        # is better than an alarm about something that is probably fine.
+        return None
+    except (CronJobError, OSError) as exc:
+        return Issue("info", "Could not check cron-job.org",
+                     f"{exc} Your schedule is probably fine; this is only the check failing.",
+                     "/setup/trigger", "Open")
+
+    if not plan.changed:
+        return None
+
+    return Issue("warn", "Your punctual schedule is out of date",
+                 f"cron-job.org fires at different times from the ones you picked ({plan.summary()})",
+                 "/setup/trigger", "Sync now")
+
+
 def check_github(cfg: Config) -> Issue | None:
     if not (cfg.github_repo and _secret("GITHUB_TOKEN")):
         return Issue("info", "GitHub is not connected here",
@@ -131,7 +195,7 @@ def check_github(cfg: Config) -> Issue | None:
 
 
 CHECKS = (check_model, check_linkedin, check_schedule, check_topics,
-          check_last_run, check_github)
+          check_last_run, check_trigger, check_github)
 
 
 def issues(cfg: Config | None = None) -> list[Issue]:

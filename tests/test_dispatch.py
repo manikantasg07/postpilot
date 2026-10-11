@@ -6,11 +6,15 @@ import dataclasses
 import pytest
 import yaml
 
+from agent import paths
 from agent.config import Config
 from agent.github import dispatch
 from agent.schedule import trigger_times
 
 WORKFLOW = "post.yml"
+# Captured before conftest sandboxes paths.ROOT: these tests are about the real
+# workflow file in the repository, not a throwaway one.
+REAL_WORKFLOW = paths.ROOT / ".github" / "workflows" / WORKFLOW
 
 
 def test_the_url_points_at_the_posting_workflow():
@@ -52,9 +56,7 @@ def test_the_documented_headers_carry_the_token():
 # --- the workflow has to accept what we tell people to send -----------------
 
 def workflow() -> dict:
-    from agent import paths
-    text = (paths.ROOT / ".github" / "workflows" / WORKFLOW).read_text(encoding="utf-8")
-    return yaml.safe_load(text)
+    return yaml.safe_load(REAL_WORKFLOW.read_text(encoding="utf-8"))
 
 
 def test_the_workflow_accepts_the_mode_we_send():
@@ -123,3 +125,22 @@ def test_these_are_local_times_not_utc():
 ])
 def test_the_gap_follows_the_review_window(minutes, expected):
     assert trigger_times(preview(["12:00"], minutes)) == expected
+
+
+def test_saving_a_schedule_does_not_erase_the_dispatch_block():
+    """The app rewrites post.yml every time you save the schedule page.
+
+    It replaces everything under `schedule:` up to the next key - comments and
+    blank lines included. A note sitting between the cron block and
+    workflow_dispatch would silently disappear the first time somebody changed
+    their posting time, taking the outside-trigger wiring's explanation with it.
+    """
+    from web.workflow import current_cron, rewrite_cron
+
+    before = REAL_WORKFLOW.read_text(encoding="utf-8")
+    after = rewrite_cron(before, ["0 6 * * *"])
+
+    assert current_cron(after) == ["0 6 * * *"]
+    assert "options: [due, slot]" in after
+    assert "Run due slots" in after
+    assert "reachable on demand" in after      # the explanation survives too

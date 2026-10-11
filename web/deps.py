@@ -12,6 +12,9 @@ from agent.status import counts, next_run, post_link, recent, streak, token_days
 from agent.topics import load_topics
 from web import charts
 
+# The dashboard is a glance, not an archive. Everything else is on /history.
+RECENT_ON_DASHBOARD = 5
+
 
 @dataclass
 class Snapshot:
@@ -30,6 +33,7 @@ class Snapshot:
     streak: int
     tally: dict[str, int]
     recent: list
+    total_runs: int         # so the dashboard knows whether five is all of them
     activity: dict          # 30-day column chart geometry
     window: dict[str, int]  # totals for the same 30 days
     slots: list[dict]       # published posts per time slot
@@ -70,7 +74,8 @@ def snapshot() -> Snapshot:
         token_days=token_days(cfg),
         streak=streak(state, now.date().isoformat()),
         tally=counts(state),
-        recent=recent(state, limit=8),
+        recent=recent(state, limit=RECENT_ON_DASHBOARD),
+        total_runs=len(state.history),
         activity=charts.activity(days),
         window=analytics.summary(days),
         slots=charts.slot_bars(analytics.by_slot(state, cfg.post_times)),

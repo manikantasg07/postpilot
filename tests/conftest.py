@@ -28,6 +28,15 @@ def sandbox_data(tmp_path, monkeypatch):
     (tmp_path / "topics.json").write_text(
         json.dumps({"topics": ["Alpha topic", "Beta topic", "Gamma topic"]}), encoding="utf-8")
 
+    # ROOT too, and with a workflow file in it. Saving the schedule rewrites
+    # post.yml, and without this a single test that posts to /setup/schedule
+    # rewrites the real one - the cron in your repository, silently, from a
+    # throwaway config.
+    workflow = tmp_path / ".github" / "workflows" / "post.yml"
+    workflow.parent.mkdir(parents=True, exist_ok=True)
+    workflow.write_text('on:\n  schedule:\n    - cron: "0 9 * * *"\n', encoding="utf-8")
+
+    monkeypatch.setattr(paths, "ROOT", tmp_path)
     monkeypatch.setattr(paths, "DATA_DIR", tmp_path)
     monkeypatch.setattr(paths, "CONFIG_FILE", tmp_path / "config.json")
     monkeypatch.setattr(paths, "STATE_FILE", tmp_path / "state.json")
@@ -39,6 +48,8 @@ def sandbox_data(tmp_path, monkeypatch):
     for name in KNOWN_SECRETS:
         monkeypatch.delenv(name, raising=False)
 
+    from web import health
     from web.routers import sync
     sync.forget_sync_cache()
+    health.forget_trigger_cache()      # a cached answer must not cross tests
     yield

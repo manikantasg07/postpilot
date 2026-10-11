@@ -83,6 +83,11 @@ h1,h2,h3 { color:var(--white); margin:0; letter-spacing:-.02em; }
 .chip-rose  { background:rgba(251,113,133,.14); color:var(--rose); font-weight:500; }
 
 /* buttons ----------------------------------------------------------------- */
+/* Every component below sets its own `display`, which beats the browser's
+   rule for the `hidden` attribute. Without this, `el.hidden = true` silently
+   does nothing and half-finished flows stay on screen. */
+[hidden] { display:none !important; }
+
 .btn { display:inline-flex; align-items:center; gap:8px; padding:13px 22px; border:0;
        border-radius:14px; font:inherit; font-weight:500; color:#fff; cursor:pointer;
        background:linear-gradient(135deg,var(--brand-500),var(--teal-500));
@@ -156,7 +161,6 @@ h1,h2,h3 { color:var(--white); margin:0; letter-spacing:-.02em; }
                              background:rgba(99,102,241,.06); }
 
 .tcount { display:flex; gap:8px; padding:16px 24px 4px; }
-.tablewrap { }
 .tlist .tpos { width:48px; color:var(--dim); font-variant-numeric:tabular-nums; }
 .tlist .is-used .topic { color:var(--muted); }
 .tlist .ttext { cursor:text; border-radius:6px; padding:2px 4px; margin-left:-4px; }
@@ -322,6 +326,11 @@ select.input { appearance:none; cursor:pointer; }
 .issue-title { color:var(--white); font-weight:600; font-size:14px; }
 .issue-detail { color:var(--muted); font-size:13px; margin-top:2px; }
 .issue-actions { flex:none; display:flex; align-items:center; gap:8px; }
+/* The dashboard's tighter variant. The flag already hides the detail line;
+   without this the two variants were the same height anyway. */
+.issues.is-compact .issue { padding:10px 14px; }
+/* Not set up yet: a badge, not an alarm. */
+.sync-off { color:var(--dim); }
 .issue-actions form { margin:0; }
 .btn-sm { padding:7px 14px; font-size:13px; }
 /* Quieter than ghost: the option you take when you have decided to do nothing. */

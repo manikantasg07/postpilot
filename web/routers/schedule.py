@@ -8,8 +8,15 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
 from agent.config import MAX_POSTS_PER_DAY, ConfigError, load_or_default, save_config
+from agent.cronjob import sync as cronjob_sync
+from agent.cronjob.errors import CronJobError
+from agent.github.errors import GitHubError
 from agent.schedule import cron_lines
+from agent.secrets_store import get_secret
 from web.app import templates
+from web.health import forget_trigger_cache
+from web.routers.github import push_settings
+from web.routers.sync import forget_sync_cache
 from web.steps import progress
 from web.workflow import WorkflowError, apply
 
@@ -27,7 +34,7 @@ def _zones() -> list[str]:
 
 
 def _render(request: Request, cfg, errors: list[str] | None = None,
-            saved: bool = False, changed: bool = False) -> HTMLResponse:
+            saved: bool = False, changed: bool = False, pushed: str = "") -> HTMLResponse:
     return templates.TemplateResponse(
         request=request,
         name="pages/setup_schedule.html",
@@ -40,6 +47,7 @@ def _render(request: Request, cfg, errors: list[str] | None = None,
             "errors": errors or [],
             "saved": saved,
             "changed": changed,
+            "pushed": pushed,
         },
     )
 
@@ -82,4 +90,57 @@ def save(
     except WorkflowError as exc:
         return _render(request, candidate, errors=[str(exc)])
 
-    return _render(request, candidate, saved=True, changed=changed)
+    # A schedule that lives in four places is only correct when all four
+    # agree, so saving updates all four. Nothing here can undo the save: each
+    # step reports its own failure and the next one still runs.
+    pushed = " ".join(filter(None, [_push_to_github(candidate), _push_to_service(candidate)]))
+
+    return _render(request, candidate, saved=True, changed=changed, pushed=pushed)
+
+
+def _push_to_github(cfg) -> str:
+    """Send config.json, topics.json and post.yml up, as one commit.
+
+    Actions runs the code that is in the repo and reads the schedule from the
+    repo, so a schedule that stays on this laptop changes nothing at all. This
+    used to be a separate button, which meant the most important step was the
+    one easiest to forget.
+    """
+    try:
+        token = get_secret("GITHUB_TOKEN") or ""
+    except Exception:
+        return ""
+    if not (token and cfg.github_repo):
+        return ""
+
+    try:
+        sent = push_settings(cfg.github_repo, token)
+    except (GitHubError, OSError) as exc:
+        return f"GitHub was not updated: {exc}"
+
+    forget_sync_cache()
+    return f"Pushed {len(sent)} file(s) to GitHub." if sent else "GitHub already matched."
+
+
+def _push_to_service(cfg) -> str:
+    """Keep cron-job.org in step, if the app has been given the keys.
+
+    A failure here is reported, never raised: the schedule itself saved fine,
+    and losing that because a third party was briefly unreachable would be
+    worse than being late for one day.
+    """
+    try:
+        key = get_secret("CRONJOB_API_KEY") or ""
+        token = get_secret("GITHUB_DISPATCH_TOKEN") or ""
+    except Exception:
+        return ""
+
+    if not (key and token and cfg.github_repo):
+        return ""
+
+    try:
+        summary = cronjob_sync.apply(cfg, cfg.github_repo, token, key).summary()
+        forget_trigger_cache()
+        return "cron-job.org: " + summary
+    except CronJobError as exc:
+        return f"cron-job.org was not updated: {exc}"

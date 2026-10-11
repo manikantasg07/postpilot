@@ -37,15 +37,3 @@ document.querySelectorAll("textarea[data-mirror]").forEach((area) => {
 document.querySelectorAll(".li-text").forEach((block) => {
   block.addEventListener("click", () => block.classList.toggle("is-open"));
 });
-
-// Writing and posting take a few seconds: say so, and block a second click.
-document.querySelectorAll("button[data-busy]").forEach((button) => {
-  const form = button.form;
-  if (!form) return;
-  form.addEventListener("submit", () => {
-    button.textContent = button.dataset.busy;
-    // Disabling inside the submit handler can cancel the submit in some
-    // browsers, so wait until the request is already on its way.
-    setTimeout(() => (button.disabled = true), 0);
-  });
-});

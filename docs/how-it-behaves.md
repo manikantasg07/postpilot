@@ -124,6 +124,22 @@ A run that opens the issue leaves that slot for the next run. Two reasons:
 
 It costs one tick of delay and removes a whole class of surprise.
 
+### Why the draft is assigned to you
+
+GitHub Mobile only pushes for a fixed set of categories: mentions,
+assignments, review requests, and workflow runs. **"An issue was opened in a
+repository you watch" is not one of them.** A draft that is only labelled
+lands in the Issues tab and nowhere else, however you set your notification
+preferences - the push simply cannot fire.
+
+So each draft is opened *assigned to the repository owner*, and its first line
+is an `@you` mention. Either one is enough to reach the phone. Both sit above
+the `<!-- post:start -->` marker, so neither reaches LinkedIn.
+
+If notifications still do not arrive, check in this order: the GitHub mobile
+app is signed in to the right account, **Assigned** is on under Push
+Notification Types, and Working Hours is off (or the slot falls inside them).
+
 ### In auto mode
 
 No issue, no review, no waiting. The first run at or after 09:00 writes the post
@@ -216,13 +232,14 @@ and Settings shows the token as expired.
 
 ### "My model API key is missing or out of credit"
 
-The draft is never written, so nothing is recorded at all. Locally you see the
-error; on GitHub the run goes red. This is a gap: a failure to *write* leaves no
-trace in the history, unlike a failure to *post*.
+The draft is never written, and the failure is recorded as
+`Could not write the post: ...` — the dashboard shows it like any other failed
+run. Locally you also see the error on the page; on GitHub the run goes red.
+The slot stays open, so a later run inside the catch-up window tries again.
 
 ### "Two posting times a day"
 
-Slots are independent. `09:00` and `17:30` close separately, get their own draft
+Slots are independent. `09:00` and `17:40` close separately, get their own draft
 issues, and each takes the next topic in turn — so two posts a day uses the queue
 twice as fast.
 

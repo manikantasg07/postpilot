@@ -10,25 +10,28 @@ from agent.topics.loader import TopicError
 @dataclass
 class Pick:
     topic: str
-    is_repeat: bool
-    index: int
+    is_repeat: bool     # True when reusing an earlier topic, so ask for a fresh angle
+    index: int          # position in the topic list this pick was made at
 
-def _last_posted_topic(state: State, slot: str, today: str):
+
+def _last_posted_topic(state: State, slot: str, today: str) -> str:
     """The topic last published in this slot on an earlier day."""
     for entry in reversed(state.history):
-        if entry.status=="posted" and entry.slot==slot and entry.date!=today:
+        if entry.status == "posted" and entry.slot == slot and entry.date != today:
             return entry.topic
+    # No history for this slot yet - fall back to the most recent post in any slot
     for entry in reversed(state.history):
-        if entry.status=="posted" and entry.date!=today:
+        if entry.status == "posted" and entry.date != today:
             return entry.topic
     return ""
 
-def pick_topic(topics: list[str], state: State, slot: str, today: str):
+
+def pick_topic(topics: list[str], state: State, slot: str, today: str) -> Pick:
     """Next unused topic if there is one, otherwise repeat the previous day's."""
     index = state.next_topic_index
 
-    if 0<=index<len(topics):
-        return Pick(topics[index], False, index)
+    if 0 <= index < len(topics):
+        return Pick(topic=topics[index], is_repeat=False, index=index)
 
     previous = _last_posted_topic(state, slot, today)
     if previous:

@@ -83,19 +83,19 @@ def test_start_returns_what_the_page_shows(monkeypatch):
 def test_pending_approval_is_not_an_error(monkeypatch):
     monkeypatch.setattr(device.requests, "post",
                         lambda *a, **k: FakeResponse({"error": "authorization_pending"}))
-    assert device.poll_once("Iv1.test", "long") is None
+    assert device.poll_once("Iv1.test", "long").waiting
 
 
 def test_slow_down_also_just_means_keep_waiting(monkeypatch):
     monkeypatch.setattr(device.requests, "post",
                         lambda *a, **k: FakeResponse({"error": "slow_down"}))
-    assert device.poll_once("Iv1.test", "long") is None
+    assert device.poll_once("Iv1.test", "long").waiting
 
 
 def test_approval_gives_back_the_token(monkeypatch):
     monkeypatch.setattr(device.requests, "post",
                         lambda *a, **k: FakeResponse({"access_token": "gho_abc"}))
-    assert device.poll_once("Iv1.test", "long") == "gho_abc"
+    assert device.poll_once("Iv1.test", "long").token == "gho_abc"
 
 
 def test_a_refusal_stops_the_polling(monkeypatch):
@@ -124,3 +124,100 @@ def test_other_failures_keep_the_status_code(monkeypatch):
     monkeypatch.setattr(api.requests, "request", lambda *a, **k: FakeResponse({}, status=500))
     with pytest.raises(GitHubError, match="500"):
         api.call("GET", "/user", "token")
+
+
+def test_slow_down_is_told_apart_from_still_waiting(monkeypatch):
+    """Both mean "no token yet", but only one is fixed by asking less often."""
+    monkeypatch.setattr(device.requests, "post",
+                        lambda *a, **k: FakeResponse({"error": "slow_down"}))
+
+    answer = device.poll_once("Iv1.test", "long")
+
+    assert answer.waiting and answer.too_fast
+
+
+def test_plain_waiting_is_not_a_back_off(monkeypatch):
+    monkeypatch.setattr(device.requests, "post",
+                        lambda *a, **k: FakeResponse({"error": "authorization_pending"}))
+
+    answer = device.poll_once("Iv1.test", "long")
+
+    assert answer.waiting and not answer.too_fast
+
+
+# --- several files, one commit ----------------------------------------------
+
+def test_put_files_builds_one_commit_and_moves_the_branch(monkeypatch):
+    from agent.github import api
+
+    calls = []
+
+    def fake(method, path, token, **kw):
+        calls.append(f"{method} {path}")
+        if path.endswith("/git/ref/heads/main"):
+            return {"object": {"sha": "head1"}}
+        if "/git/commits/head1" in path:
+            return {"tree": {"sha": "tree0"}}
+        if path.endswith("/git/trees"):
+            assert kw["json"]["base_tree"] == "tree0"
+            return {"sha": "tree1"}
+        if path.endswith("/git/commits"):
+            assert kw["json"]["parents"] == ["head1"]
+            assert kw["json"]["tree"] == "tree1"
+            return {"sha": "commit1"}
+        if "/git/refs/heads/main" in path:
+            assert kw["json"]["sha"] == "commit1"
+            return {}
+        return {"default_branch": "main"}
+
+    monkeypatch.setattr(api, "call", fake)
+
+    sha = api.put_files("me/agent", {"a.json": "1", "b.yml": "2"}, "one commit", "tok")
+
+    assert sha == "commit1"
+    assert sum(1 for c in calls if c == "POST /repos/me/agent/git/commits") == 1
+
+
+def test_put_files_does_nothing_when_nothing_changed(monkeypatch):
+    from agent.github import api
+    monkeypatch.setattr(api, "call", lambda *a, **k: pytest.fail("should not call GitHub"))
+    assert api.put_files("me/agent", {}, "no-op", "tok") == ""
+
+
+# --- the repository box accepts what people actually paste -------------------
+# A pasted browser URL used to be stored verbatim, so the next push asked for
+# /repos/https://github.com/owner/repo/contents/... and GitHub answered 404
+# with nothing in the message pointing at the real mistake.
+
+@pytest.mark.parametrize("typed", [
+    "me/agent",
+    "  me/agent  ",
+    "https://github.com/me/agent",
+    "https://github.com/me/agent/",
+    "http://github.com/me/agent",
+    "https://www.github.com/me/agent",
+    "github.com/me/agent",
+    "https://github.com/me/agent.git",
+    "git@github.com:me/agent.git",
+])
+def test_normalise_repo_accepts_every_form_of_the_same_repo(typed):
+    from agent.github import api
+    assert api.normalise_repo(typed) == "me/agent"
+
+
+@pytest.mark.parametrize("typed", [
+    "",
+    "agent",
+    "https://github.com/me",
+    "https://github.com/me/agent/tree/main",
+    "https://gitlab.com/me/agent",
+    "https://github.com/me/agent/issues/4",
+])
+def test_normalise_repo_refuses_what_is_not_a_repository(typed):
+    from agent.github import api
+    assert api.normalise_repo(typed) == ""
+
+
+def test_a_repo_with_dots_and_dashes_survives():
+    from agent.github import api
+    assert api.normalise_repo("https://github.com/my-org/my.cool-repo") == "my-org/my.cool-repo"
