@@ -7,10 +7,10 @@ on:
     - cron: "0 13 * * *"
     - cron: "30 13 * * *"
     - cron: "0 14 * * *"
-    - cron: "30 15 * * *"
-    - cron: "0 16 * * *"
-    - cron: "30 16 * * *"
-    - cron: "0 17 * * *"
+    - cron: "35 17 * * *"
+    - cron: "5 18 * * *"
+    - cron: "35 18 * * *"
+    - cron: "5 19 * * *"
 
   workflow_dispatch:
     # The same job, reachable on demand. An outside scheduler calls this when
