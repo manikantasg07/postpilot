@@ -1,11 +1,11 @@
 {
   "llm_provider": "openai",
-  "llm_model": "",
-  "timezone": "America/Los_Angeles",
+  "llm_model": "gpt-4.1-mini",
+  "timezone": "America/New_York",
   "posts_per_day": 2,
   "post_times": [
     "09:00",
-    "17:40"
+    "12:00"
   ],
   "mode": "preview",
   "preview_minutes": 30,
@@ -13,8 +13,8 @@
   "catch_up_hours": 6,
   "tone": "professional",
   "author_context": "",
-  "linkedin_member_id": "gO0v4mD6yc",
-  "linkedin_token_expires": "2026-11-25",
-  "github_client_id": "Ov23liWImPY2qw0i0u5c",
-  "github_repo": "sud018/linkedin-agent"
+  "linkedin_member_id": "_0tyECORzn",
+  "linkedin_token_expires": "2026-12-09",
+  "github_client_id": "Ov23ctz7uZzSPbJrIxbM",
+  "github_repo": "manikantasg07/postpilot"
 }
